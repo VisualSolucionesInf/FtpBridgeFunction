@@ -32,42 +32,48 @@ public class UploadToFtp
         {
             _logger.LogError(ex, "Error al parsear el body recibido.");
             var badReq = req.CreateResponse(HttpStatusCode.BadRequest);
-            await badReq.WriteStringAsync("Body invalido. Se esperaba JSON con 'base64Content' y 'fileName'.");
+            await badReq.WriteStringAsync("Error al parsear el body recibido.");
             return badReq;
         }
 
-        if (payload is null || string.IsNullOrWhiteSpace(payload.Base64Content) || string.IsNullOrWhiteSpace(payload.FileName))
+        if (payload is null
+            || string.IsNullOrWhiteSpace(payload.Base64Content)
+            || string.IsNullOrWhiteSpace(payload.FileName)
+            || string.IsNullOrWhiteSpace(payload.FtpHost)
+            || string.IsNullOrWhiteSpace(payload.FtpUser)
+            || string.IsNullOrWhiteSpace(payload.FtpPassword))
         {
             var badReq = req.CreateResponse(HttpStatusCode.BadRequest);
-            await badReq.WriteStringAsync("Faltan campos obligatorios: 'base64Content' y 'fileName'.");
+            await badReq.WriteStringAsync("Falta alguno de los campos obligatorios:" +
+                " 'base64Content', 'fileName', 'ftpHost', 'ftpUser', 'ftpPassword'.");
             return badReq;
         }
 
-        string? ftpHost = Environment.GetEnvironmentVariable("FTP_HOST");
-        string? ftpUser = Environment.GetEnvironmentVariable("FTP_USER");
-        string? ftpPassword = Environment.GetEnvironmentVariable("FTP_PASSWORD");
-        string? ftpFolder = Environment.GetEnvironmentVariable("FTP_FOLDER") ?? string.Empty;
-
-        if (string.IsNullOrWhiteSpace(ftpHost) || string.IsNullOrWhiteSpace(ftpUser) || string.IsNullOrWhiteSpace(ftpPassword))
-        {
-            _logger.LogError("Faltan variables de entorno FTP_HOST / FTP_USER / FTP_PASSWORD.");
-            var cfgError = req.CreateResponse(HttpStatusCode.InternalServerError);
-            await cfgError.WriteStringAsync("Configuracion FTP incompleta en el servidor (variables de entorno).");
-            return cfgError;
-        }
+        string? ftpHost = payload.FtpHost;
+        string? ftpUser = payload.FtpUser;
+        string? ftpPassword = payload.FtpPassword;
+        string? ftpFolder = payload.DestinyFolder;
 
         try
         {
             byte[] fileBytes = Convert.FromBase64String(payload.Base64Content);
 
-            string remotePath = $"ftp://{ftpHost.TrimEnd('/')}/{ftpFolder.Trim('/')}/{payload.FileName}".Replace("//", "/").Replace("ftp:/", "ftp://");
+            string remotePath = $"ftp://{ftpHost.TrimEnd('/')}";
+            // Puerto explícito.
+            if (payload.Port != null)
+                remotePath += $":{payload.Port}";
+            // Directorio desde raíz.
+            if (!string.IsNullOrEmpty(ftpFolder))
+                remotePath += $"/{ftpFolder.Trim('/')}";
+
+            remotePath += $"/{payload.FileName}".Replace("//", "/").Replace("ftp:/", "ftp://");
 
             var request = (FtpWebRequest)WebRequest.Create(remotePath);
             request.Method = WebRequestMethods.Ftp.UploadFile;
             request.Credentials = new NetworkCredential(ftpUser, ftpPassword);
             request.UsePassive = true;
             request.UseBinary = true;
-            request.EnableSsl = bool.TryParse(Environment.GetEnvironmentVariable("FTP_USE_SSL"), out var useSsl) && useSsl;
+            request.EnableSsl = payload.UseSsl ?? false;
 
             using (var requestStream = await request.GetRequestStreamAsync())
             {
@@ -95,4 +101,10 @@ public class UploadPayload
 {
     public string? Base64Content { get; set; }
     public string? FileName { get; set; }
+    public string? FtpHost { get; set; }
+    public string? FtpUser { get; set; }
+    public string? FtpPassword { get; set; }
+    public string? DestinyFolder { get; set; }
+    public bool? UseSsl { get; set; }
+    public int? Port { get; set; }
 }
