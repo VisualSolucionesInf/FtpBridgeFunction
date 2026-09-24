@@ -1,19 +1,16 @@
-using System.Net;
-using System.Text.Json;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
 using Microsoft.Extensions.Logging;
+using Renci.SshNet;
+using Renci.SshNet.Async;
+using System.Net;
+using System.Text.Json;
 
 namespace FtpBridgeFunction;
 
-public class UploadToFtp
+public class UploadToFtp(ILogger<UploadToFtp> logger)
 {
-    private readonly ILogger<UploadToFtp> _logger;
-
-    public UploadToFtp(ILogger<UploadToFtp> logger)
-    {
-        _logger = logger;
-    }
+    private readonly ILogger<UploadToFtp> _logger = logger;
 
     [Function("UploadToFtp")]
     public async Task<HttpResponseData> Run(
@@ -49,42 +46,29 @@ public class UploadToFtp
             return badReq;
         }
 
-        string? ftpHost = payload.FtpHost;
-        string? ftpUser = payload.FtpUser;
-        string? ftpPassword = payload.FtpPassword;
-        string? ftpFolder = payload.DestinyFolder;
-
         try
         {
             byte[] fileBytes = Convert.FromBase64String(payload.Base64Content);
 
-            string remotePath = $"ftp://{ftpHost.TrimEnd('/')}";
+            string remotePath = $"ftp://{payload.FtpHost.TrimEnd('/')}";
             // Puerto explícito.
             if (payload.Port != null)
                 remotePath += $":{payload.Port}";
             // Directorio desde raíz.
-            if (!string.IsNullOrEmpty(ftpFolder))
-                remotePath += $"/{ftpFolder.Trim('/')}";
+            if (!string.IsNullOrEmpty(payload.DestinyFolder))
+                remotePath += $"/{payload.DestinyFolder.Trim('/')}";
 
             remotePath += $"/{payload.FileName}".Replace("//", "/").Replace("ftp:/", "ftp://");
 
-            var request = (FtpWebRequest)WebRequest.Create(remotePath);
-            request.Method = WebRequestMethods.Ftp.UploadFile;
-            request.Credentials = new NetworkCredential(ftpUser, ftpPassword);
-            request.UsePassive = true;
-            request.UseBinary = true;
-            request.EnableSsl = payload.UseSsl ?? false;
+            if (payload.UseSFTP ?? false)
+                await ProcessViaFtp(payload, fileBytes, remotePath);
+            else
+                await ProcessViaSftpSftp(payload, fileBytes, payload.DestinyFolder ?? string.Empty);
 
-            using (var requestStream = await request.GetRequestStreamAsync())
-            {
-                await requestStream.WriteAsync(fileBytes, 0, fileBytes.Length);
-            }
-
-            using var response = (FtpWebResponse)await request.GetResponseAsync();
-            _logger.LogInformation("Subida completada. Estado FTP: {Status}", response.StatusDescription);
-
+            var method = payload.UseSFTP switch { true => "SFTP", _ => "" };
+            _logger.LogInformation($"Subida completada vía {method}.");
             var ok = req.CreateResponse(HttpStatusCode.OK);
-            await ok.WriteStringAsync($"Fichero '{payload.FileName}' subido correctamente. Estado FTP: {response.StatusDescription}");
+            await ok.WriteStringAsync($"Fichero '{payload.FileName}' subido correctamente");
             return ok;
         }
         catch (Exception ex)
@@ -94,6 +78,33 @@ public class UploadToFtp
             await error.WriteStringAsync($"Error al subir el fichero por FTP: {ex.Message}");
             return error;
         }
+    }
+
+    private static async Task<FtpWebResponse?> ProcessViaFtp(UploadPayload payload, byte[] fileBytes, string remotePath)
+    {
+        var request = (FtpWebRequest)WebRequest.Create(remotePath);
+        request.Method = WebRequestMethods.Ftp.UploadFile;
+        request.Credentials = new NetworkCredential(payload.FtpUser, payload.FtpPassword);
+        request.UsePassive = true;
+        request.UseBinary = true;
+        request.EnableSsl = payload.UseSsl ?? false;
+
+        using (var requestStream = await request.GetRequestStreamAsync())
+        {
+            await requestStream.WriteAsync(fileBytes, 0, fileBytes.Length);
+        }
+
+        using var response = (FtpWebResponse)await request.GetResponseAsync();
+        return response;
+    }
+
+    private static async Task ProcessViaSftpSftp(UploadPayload payload, byte[] fileBytes, string ftpFolder)
+    {
+        using var client = new SftpClient(payload.FtpHost, payload.FtpUser, payload.FtpPassword);
+        client.Connect();
+        using var stream = new MemoryStream(fileBytes);
+        await client.UploadAsync(stream, $"{ftpFolder}/{payload.FileName}");
+        client.Disconnect();
     }
 }
 
@@ -107,4 +118,5 @@ public class UploadPayload
     public string? DestinyFolder { get; set; }
     public bool? UseSsl { get; set; }
     public int? Port { get; set; }
+    public bool? UseSFTP { get; set; }
 }

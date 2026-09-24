@@ -3,6 +3,8 @@ using System.Text.Json;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
 using Microsoft.Extensions.Logging;
+using Renci.SshNet;
+using Renci.SshNet.Async;
 
 namespace FtpBridgeFunction;
 
@@ -53,17 +55,11 @@ public class DownloadFromFtp
             string remotePath = $"ftp://{payload.FtpHost.TrimEnd('/')}/{ftpFolder.Trim('/')}/{payload.FileName}"
                 .Replace("//", "/").Replace("ftp:/", "ftp://");
 
-            var request = (FtpWebRequest)WebRequest.Create(remotePath);
-            request.Method = WebRequestMethods.Ftp.DownloadFile;
-            request.Credentials = new NetworkCredential(payload.FtpUser, payload.FtpPassword);
-            request.UsePassive = true;
-            request.UseBinary = true;
-            request.EnableSsl = payload.UseSsl;
-
-            using var response = (FtpWebResponse)await request.GetResponseAsync();
-            using var responseStream = response.GetResponseStream();
-            using var memoryStream = new MemoryStream();
-            await responseStream.CopyToAsync(memoryStream);
+            byte[] memoryStream;
+            if (payload.UseSFTP ?? false)
+                memoryStream = await Sftp(payload, remotePath);
+            else
+                memoryStream = await Ftp(payload, ftpFolder);
 
             string base64Content = Convert.ToBase64String(memoryStream.ToArray());
 
@@ -79,6 +75,31 @@ public class DownloadFromFtp
             return error;
         }
     }
+
+    private static async Task<byte[]> Ftp(DownloadPayload payload, string remotePath)
+    {
+        var request = (FtpWebRequest)WebRequest.Create(remotePath);
+        request.Method = WebRequestMethods.Ftp.DownloadFile;
+        request.Credentials = new NetworkCredential(payload.FtpUser, payload.FtpPassword);
+        request.UsePassive = true;
+        request.UseBinary = true;
+        request.EnableSsl = payload.UseSsl;
+        using var response = (FtpWebResponse)await request.GetResponseAsync();
+        using var responseStream = response.GetResponseStream();
+        using var memoryStream = new MemoryStream();
+        await responseStream.CopyToAsync(memoryStream);
+        return memoryStream.ToArray();
+    }
+
+    private static async Task<byte[]> Sftp(DownloadPayload payload, string ftpFolder)
+    {
+        using var client = new SftpClient(payload.FtpHost, payload.FtpUser, payload.FtpPassword);
+        client.Connect();
+        using var memoryStream = new MemoryStream();
+        await client.DownloadAsync($"{ftpFolder}/{payload.FileName}", memoryStream);
+        client.Disconnect();
+        return memoryStream.ToArray();
+    }
 }
 
 public class DownloadPayload
@@ -89,4 +110,5 @@ public class DownloadPayload
     public string? FtpFolder { get; set; }
     public string? FileName { get; set; }
     public bool UseSsl { get; set; }
+    public bool? UseSFTP { get; set; }
 }
