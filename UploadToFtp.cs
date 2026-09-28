@@ -60,12 +60,12 @@ public class UploadToFtp(ILogger<UploadToFtp> logger)
 
             remotePath += $"/{payload.FileName}".Replace("//", "/").Replace("ftp:/", "ftp://");
 
-            if (payload.UseSFTP ?? false)
+            if (payload.UseSftp ?? false)
                 await ProcessViaFtp(payload, fileBytes, remotePath);
             else
                 await ProcessViaSftpSftp(payload, fileBytes, payload.DestinyFolder ?? string.Empty);
 
-            var method = payload.UseSFTP switch { true => "SFTP", _ => "" };
+            var method = payload.UseSftp switch { true => "SFTP", _ => "" };
             _logger.LogInformation($"Subida completada vía {method}.");
             var ok = req.CreateResponse(HttpStatusCode.OK);
             await ok.WriteStringAsync($"Fichero '{payload.FileName}' subido correctamente");
@@ -118,5 +118,5 @@ public class UploadPayload
     public string? DestinyFolder { get; set; }
     public bool? UseSsl { get; set; }
     public int? Port { get; set; }
-    public bool? UseSFTP { get; set; }
+    public bool? UseSftp { get; set; }
 }

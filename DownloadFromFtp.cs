@@ -56,7 +56,7 @@ public class DownloadFromFtp
                 .Replace("//", "/").Replace("ftp:/", "ftp://");
 
             byte[] memoryStream;
-            if (payload.UseSFTP ?? false)
+            if (payload.UseSftp ?? false)
                 memoryStream = await Sftp(payload, remotePath);
             else
                 memoryStream = await Ftp(payload, ftpFolder);
@@ -110,5 +110,5 @@ public class DownloadPayload
     public string? FtpFolder { get; set; }
     public string? FileName { get; set; }
     public bool UseSsl { get; set; }
-    public bool? UseSFTP { get; set; }
+    public bool? UseSftp { get; set; }
 }
