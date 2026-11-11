@@ -61,9 +61,9 @@ public class UploadToFtp(ILogger<UploadToFtp> logger)
             remotePath += $"/{payload.FileName}".Replace("//", "/").Replace("ftp:/", "ftp://");
 
             if (payload.UseSftp ?? false)
-                await ProcessViaFtp(payload, fileBytes, remotePath);
+                await ProcessViaSftp(payload, fileBytes, payload.DestinyFolder ?? string.Empty);
             else
-                await ProcessViaSftpSftp(payload, fileBytes, payload.DestinyFolder ?? string.Empty);
+                await ProcessViaFtp(payload, fileBytes, remotePath);
 
             var method = payload.UseSftp switch { true => "SFTP", _ => "" };
             _logger.LogInformation($"Subida completada vía {method}.");
@@ -98,7 +98,7 @@ public class UploadToFtp(ILogger<UploadToFtp> logger)
         return response;
     }
 
-    private static async Task ProcessViaSftpSftp(UploadPayload payload, byte[] fileBytes, string ftpFolder)
+    private static async Task ProcessViaSftp(UploadPayload payload, byte[] fileBytes, string ftpFolder)
     {
         using var client = new SftpClient(payload.FtpHost, payload.FtpUser, payload.FtpPassword);
         client.Connect();
