@@ -52,14 +52,21 @@ public class DownloadFromFtp
         try
         {
             string ftpFolder = payload.FtpFolder ?? string.Empty;
-            string remotePath = $"ftp://{payload.FtpHost.TrimEnd('/')}/{ftpFolder.Trim('/')}/{payload.FileName}"
-                .Replace("//", "/").Replace("ftp:/", "ftp://");
+            string remotePath = $"ftp://{payload.FtpHost.TrimEnd('/')}";
+            // Puerto explícito.
+            if (payload.Port != null)
+                remotePath += $":{payload.Port}";
+            // Directorio desde raíz.
+            if (!string.IsNullOrEmpty(payload.FtpFolder))
+                remotePath += $"/{payload.FtpFolder.Trim('/')}";
+
+            remotePath += $"/{payload.FileName}".Replace("//", "/").Replace("ftp:/", "ftp://");
 
             byte[] memoryStream;
             if (payload.UseSftp ?? false)
-                memoryStream = await Sftp(payload, remotePath);
+                memoryStream = await Sftp(payload);
             else
-                memoryStream = await Ftp(payload, ftpFolder);
+                memoryStream = await Ftp(payload, remotePath);
 
             string base64Content = Convert.ToBase64String(memoryStream.ToArray());
 
@@ -83,7 +90,7 @@ public class DownloadFromFtp
         request.Credentials = new NetworkCredential(payload.FtpUser, payload.FtpPassword);
         request.UsePassive = true;
         request.UseBinary = true;
-        request.EnableSsl = payload.UseSsl;
+        request.EnableSsl = payload.UseSsl ?? false;
         using var response = (FtpWebResponse)await request.GetResponseAsync();
         using var responseStream = response.GetResponseStream();
         using var memoryStream = new MemoryStream();
@@ -91,12 +98,12 @@ public class DownloadFromFtp
         return memoryStream.ToArray();
     }
 
-    private static async Task<byte[]> Sftp(DownloadPayload payload, string ftpFolder)
+    private static async Task<byte[]> Sftp(DownloadPayload payload)
     {
         using var client = new SftpClient(payload.FtpHost, payload.FtpUser, payload.FtpPassword);
         client.Connect();
         using var memoryStream = new MemoryStream();
-        await client.DownloadAsync($"{ftpFolder}/{payload.FileName}", memoryStream);
+        await client.DownloadAsync($"/{payload.FtpFolder?.Trim('/')}/{payload.FileName}", memoryStream);
         client.Disconnect();
         return memoryStream.ToArray();
     }
@@ -109,6 +116,7 @@ public class DownloadPayload
     public string? FtpPassword { get; set; }
     public string? FtpFolder { get; set; }
     public string? FileName { get; set; }
-    public bool UseSsl { get; set; }
+    public bool? UseSsl { get; set; }
     public bool? UseSftp { get; set; }
+    public int? Port { get; set; }
 }
