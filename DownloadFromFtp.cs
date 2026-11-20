@@ -70,9 +70,23 @@ public class DownloadFromFtp
 
             string base64Content = Convert.ToBase64String(memoryStream.ToArray());
 
+            // ######## RAR TO ZIP ########
+            if (payload.ConvertRarToZip ?? false)
+            {
+                // Convierte el RAR descargado a ZIP antes de devolverlo a Base64.
+                base64Content = await ConvertRarToZip(base64Content);
+            }
+
             var ok = req.CreateResponse(HttpStatusCode.OK);
             await ok.WriteAsJsonAsync(new { fileName = payload.FileName, base64Content });
             return ok;
+        }
+        catch (CompressConvertException ex)
+        {
+            _logger.LogError(ex, "Error al convertir de RAR a ZIP");
+            var error = req.CreateResponse(HttpStatusCode.InternalServerError);
+            await error.WriteStringAsync($"Error al convertir de RAR a ZIP: {ex.Message}");
+            return error;
         }
         catch (Exception ex)
         {
@@ -107,6 +121,21 @@ public class DownloadFromFtp
         client.Disconnect();
         return memoryStream.ToArray();
     }
+
+    private static async Task<string> ConvertRarToZip(string rarBase64)
+    {
+        using var rarStream = new MemoryStream(Convert.FromBase64String(rarBase64));
+        using var zipStream = new MemoryStream();
+        try
+        {
+            await CompressionConverter.RarToZip(rarStream, zipStream);
+        }
+        catch (Exception ex)
+        {
+            throw new CompressConvertException(ex.Message, ex);
+        }
+        return Convert.ToBase64String(zipStream.ToArray());
+    }
 }
 
 public class DownloadPayload
@@ -119,4 +148,5 @@ public class DownloadPayload
     public bool? UseSsl { get; set; }
     public bool? UseSftp { get; set; }
     public int? Port { get; set; }
+    public bool? ConvertRarToZip { get; set; }
 }
