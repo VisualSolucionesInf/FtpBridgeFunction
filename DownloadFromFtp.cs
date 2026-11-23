@@ -1,5 +1,6 @@
 ﻿using System.Net;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
 using Microsoft.Extensions.Logging;
@@ -78,22 +79,37 @@ public class DownloadFromFtp
             }
 
             var ok = req.CreateResponse(HttpStatusCode.OK);
-            await ok.WriteAsJsonAsync(new { fileName = payload.FileName, base64Content });
+            await ok.WriteAsJsonAsync(new DownloadResponse()
+            {
+                FileName = payload.FileName,
+                Success = true,
+                Base64Content = base64Content
+            });
             return ok;
         }
         catch (CompressConvertException ex)
         {
             _logger.LogError(ex, "Error al convertir de RAR a ZIP");
-            var error = req.CreateResponse(HttpStatusCode.InternalServerError);
-            await error.WriteStringAsync($"Error al convertir de RAR a ZIP: {ex.Message}");
-            return error;
+            var okButFailure = req.CreateResponse(HttpStatusCode.OK);
+            await okButFailure.WriteAsJsonAsync(new DownloadResponse()
+            {
+                FileName = payload.FileName,
+                Success = false,
+                ErrorMessage = $"Error al convertir de RAR a ZIP: {ex.Message}"
+            });
+            return okButFailure;
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error al descargar el fichero por FTP.");
-            var error = req.CreateResponse(HttpStatusCode.InternalServerError);
-            await error.WriteStringAsync($"Error al descargar el fichero por FTP: {ex.Message}");
-            return error;
+            var okButFailure = req.CreateResponse(HttpStatusCode.OK);
+            await okButFailure.WriteAsJsonAsync(new DownloadResponse()
+            {
+                FileName = payload.FileName,
+                Success = false,
+                ErrorMessage = ex.Message
+            });
+            return okButFailure;
         }
     }
 
@@ -149,4 +165,16 @@ public class DownloadPayload
     public bool? UseSftp { get; set; }
     public int? Port { get; set; }
     public bool? ConvertRarToZip { get; set; }
+}
+
+public class DownloadResponse
+{
+    [JsonPropertyName("fileName")]
+    public string FileName { get; set; } = string.Empty;
+    [JsonPropertyName("success")]
+    public bool Success { get; set; } = false;
+    [JsonPropertyName("errorMessage")]
+    public string ErrorMessage { get; set; } = string.Empty;
+    [JsonPropertyName("base64Content")]
+    public string Base64Content { get; set; } = string.Empty;
 }
